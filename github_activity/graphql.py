@@ -297,3 +297,40 @@ class GitHubGraphQlQuery:
             return committers
 
         self.data["committers"] = self.data["commits"].map(get_committers)
+
+
+def fetch_text_file(owner, repository, gitref, filepath, auth=None):
+    """Fetch a text file using GitHub GraphQL
+
+    Parameters
+    ----------
+    auth : string | None
+      An authentication token for GitHub. If None, then the environment
+      variable `GITHUB_ACCESS_TOKEN` will be tried.
+    owner : string
+      GitHub repository owner
+    repository : string
+      GitHub repository name
+    gitref : string
+      Git reference (e.g. branch name, HEAD)
+    filepath : string
+      File path in the repository
+    """
+    query = f"""\
+    {{
+      repository(owner: "{owner}", name: "{repository}") {{
+        ... on Repository {{
+          object(expression: "{gitref}:{filepath}") {{
+            ... on Blob {{
+              text
+            }}
+          }}
+        }}
+      }}
+    }}
+    """
+    response = graphql_request(auth, query)
+    try:
+        return response["data"]["repository"]["object"]["text"]
+    except TypeError:
+        raise ValueError("Text file not found")
