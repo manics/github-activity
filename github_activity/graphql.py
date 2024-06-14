@@ -117,6 +117,45 @@ gql_template = """\
 """
 
 
+def graphql_request(auth, query):
+    """Make an authenticated GitHub GraphQL request and check for errors
+
+    Parameters
+    ----------
+    auth : string | None
+      An authentication token for GitHub. If None, then the environment
+      variable `GITHUB_ACCESS_TOKEN` will be tried.
+    query : string
+      The GraphQL query. Variables are not currently supported.
+    """
+    auth = auth or os.environ.get("GITHUB_ACCESS_TOKEN")
+    if not auth:
+        raise ValueError(
+            "Either the environment variable GITHUB_ACCESS_TOKEN or the "
+            "--auth flag or must be used to pass a Personal Access Token "
+            "needed by the GitHub API. You can generate a token at "
+            "https://github.com/settings/tokens/new. Note that while "
+            "working with a public repository, you don’t need to set any "
+            "scopes on the token you create."
+        )
+    headers = {"Authorization": f"Bearer {auth}"}
+    response = requests.post(
+        "https://api.github.com/graphql",
+        json={"query": query},
+        headers=headers,
+    )
+    if response.status_code != 200:
+        raise Exception(
+            f"Query failed to run by returning code of {response.status_code}. {query}"
+        )
+    json_response = response.json()
+    if "errors" in json_response.keys():
+        raise Exception(
+            f"Query failed to run with error {json_response['errors']}. {query}"
+        )
+    return json_response
+
+
 # Define our query object that we'll re-use for github search
 class GitHubGraphQlQuery:
     def __init__(self, query, display_progress=True, auth=None):
@@ -133,21 +172,8 @@ class GitHubGraphQlQuery:
           An authentication token for GitHub. If None, then the environment
           variable `GITHUB_ACCESS_TOKEN` will be tried.
         """
+        self.auth = auth
         self.query = query
-
-        # Authentication
-        auth = auth or os.environ.get("GITHUB_ACCESS_TOKEN")
-        if not auth:
-            raise ValueError(
-                "Either the environment variable GITHUB_ACCESS_TOKEN or the "
-                "--auth flag or must be used to pass a Personal Access Token "
-                "needed by the GitHub API. You can generate a token at "
-                "https://github.com/settings/tokens/new. Note that while "
-                "working with a public repository, you don’t need to set any "
-                "scopes on the token you create."
-            )
-        self.headers = {"Authorization": "Bearer %s" % auth}
-
         self.gql_template = gql_template
         self.display_progress = display_progress
 
@@ -180,27 +206,12 @@ class GitHubGraphQlQuery:
                 reviews=reviews_query,
                 commits=commits_query,
             )
-            ii_request = requests.post(
-                "https://api.github.com/graphql",
-                json={"query": ii_gql_query},
-                headers=self.headers,
-            )
-            if ii_request.status_code != 200:
-                raise Exception(
-                    "Query failed to run by returning code of {}. {}".format(
-                        ii_request.status_code, ii_gql_query
-                    )
-                )
-            if "errors" in ii_request.json().keys():
-                raise Exception(
-                    "Query failed to run with error {}. {}".format(
-                        ii_request.json()["errors"], ii_gql_query
-                    )
-                )
+
+            ii_request = graphql_request(self.auth, ii_gql_query)
             self.last_request = ii_request
 
             # Parse the response for this pagination
-            json = ii_request.json()["data"]["search"]
+            json = ii_request["data"]["search"]
             if ii == 0:
                 if json["issueCount"] == 0:
                     print("Found no entries for query.", file=sys.stderr)
